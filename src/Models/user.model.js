@@ -16,7 +16,12 @@ const userSchema = new Schema({
         required: true,
         unique: true,
         trim: true,
-        lowercase: true
+        lowercase: true,
+        validate: {
+            validator: (value) =>
+                /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value),
+            message: "Please enter a valid email"
+        }
     },
         fullName: {
         type: String,
@@ -48,7 +53,7 @@ const userSchema = new Schema({
 
 userSchema.pre("save", async function (next) {
     if(!this.isModified("password")) return next();
-    this.password = bcrpt.hash(this.password, 10);
+    this.password = await bcrypt.hash(this.password, 10);
     next();
 });
 
