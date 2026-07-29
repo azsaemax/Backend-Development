@@ -17,7 +17,7 @@ const registerUser = asyncHandler(async (req, res) => {
 // 8.Check for user creation if null data is fetched or exact data fetched if fetched then return a response if not then return error
 
    const{fullName, email, username, password} = req.body;
-   console.log("email", email)
+//    console.log("email", email)
 
    if ([fullName, email, username, password].some((field) => field?.trim() === "") ){
     throw new ApiError(400, "All fields are required");
@@ -33,15 +33,23 @@ const registerUser = asyncHandler(async (req, res) => {
     if(existingEmail){
         throw new ApiError(400, "Email already exists ");
     }
+    console.log("Body:", req.body);
+console.log("Files:", req.files);
+    const avatarLocalPath = req.files?.avatar?.[0]?.path;
+    const coverImageLocalPath = req.files?.coverImage?.[0]?.path;
 
-    const avatarLocalPath = req.files?.avatar[0]?.path;
-    const coverImageLocalPath = req.files?.coverImage[0]?.path;
+    // let coverImageLocalPath ;
+    // if(req.files && Array.isArray(req.files.coverImage) && req.files.coverImage.length > 0){
+    //     coverImageLocalPath = req.files.coverImage[0].path;
+    // }
 
     if(!avatarLocalPath){
         throw new ApiError(400, "Avatar is required");
     }
 
     const avatar = await uploadOnCloudinary(avatarLocalPath);
+    console.log("req.files:", req.files);
+    console.log("Avatar path:", avatarLocalPath);
     const coverImage = await uploadOnCloudinary(coverImageLocalPath);
 
     if(!avatar){
@@ -51,6 +59,7 @@ const registerUser = asyncHandler(async (req, res) => {
     const user = await  User.create({
         fullName,
         email,
+        password,
         avatar: avatar.url,
         coverImage: coverImage?.url || "",
         username: username.toLowerCase(),
