@@ -4,6 +4,11 @@ import cookieParser from "cookie-parser";
 
 const app = express();
 
+app.use((req, res, next) => {
+    console.log(`${req.method} ${req.url}`);
+    next();
+});
+
 app.use(cors({
     origin: process.env.CORS_ORIGIN,
     credentials: true,
@@ -20,8 +25,10 @@ app.use(express.static("public"));
 
 app.use(cookieParser());
 
+
 // Routes
 import userRouter from "./Routes/user.routes.js";
+
 
 app.use("/api/v1/users", userRouter);
 
