@@ -3,6 +3,7 @@ import { ApiError } from "../Utils/ApiError.js";
 import { ApiResponse } from "../Utils/ApiResponse.js";
 import { User } from "../Models/user.model.js";
 import { uploadOnCloudinary } from "../Utils/cloudinary.js";
+import { deleteFromCloudinary } from "../Utils/cloudinary.js";
 import jwt from "jsonwebtoken";
 /**
  * Generate Access & Refresh Tokens
@@ -88,8 +89,10 @@ const registerUser = asyncHandler(async (req, res) => {
         email: email.toLowerCase(),
         username: username.toLowerCase(),
         password,
-        avatar: avatar.url,
-        coverImage: coverImage?.url || "",
+        avatar: avatar.secure_url,
+        avatarPublicId: avatar.public_id,
+        coverImage: coverImage?.secure_url || "",
+        coverImagePublicId: coverImage?.public_id || "",
     });
 
     // Fetch created user without sensitive fields
@@ -312,19 +315,41 @@ const updateUserAvatar = asyncHandler(async (req, res) => {
         throw new ApiError(400, "Avatar is required.");
     }
 
+    const currentUser = await User.findById(req.user._id);
+
+    if (!currentUser) {
+        throw new ApiError(404, "User not found.");
+    }
+
+    // Delete old avatar
+    if (currentUser.avatarPublicId) {
+        await deleteFromCloudinary(currentUser.avatarPublicId);
+    }
+
+    // Upload new avatar
     const avatar = await uploadOnCloudinary(avatarLocalPath);
 
-    if (!avatar.url) {
-        throw new ApiError(500, "Error to upload avatar.");
+    if (!avatar) {
+        throw new ApiError(500, "Error uploading avatar.");
     }
 
     const user = await User.findByIdAndUpdate(
         req.user._id,
-        { $set: { avatar: avatar.url } },
-        { new: true, runValidators: true }
+        {
+            $set: {
+                avatar: avatar.secure_url,
+                avatarPublicId: avatar.public_id,
+            },
+        },
+        {
+            new: true,
+            runValidators: true,
+        }
     ).select("-password");
 
-    return res.status(200).json(new ApiResponse(200, user, "Avatar updated successfully"));
+    return res.status(200).json(
+        new ApiResponse(200, user, "Avatar updated successfully.")
+    );
 });
 const updateUserCoverImage = asyncHandler(async (req, res) => {
     const coverImageLocalPath = req.file?.path;
@@ -333,21 +358,131 @@ const updateUserCoverImage = asyncHandler(async (req, res) => {
         throw new ApiError(400, "Cover image is required.");
     }
 
-    const coverImage = await uploadOnCloudinary(coverImageLocalPath);
+    // Get current user
+    const currentUser = await User.findById(req.user._id);
 
-    if (!coverImage.url) {
-        throw new ApiError(500, "Error to upload cover image.");
+    if (!currentUser) {
+        throw new ApiError(404, "User not found.");
     }
 
+    // Delete old cover image from Cloudinary
+    if (currentUser.coverImagePublicId) {
+        await deleteFromCloudinary(currentUser.coverImagePublicId);
+    }
+
+    // Upload new cover image
+    const coverImage = await uploadOnCloudinary(coverImageLocalPath);
+
+    if (!coverImage) {
+        throw new ApiError(500, "Error uploading cover image.");
+    }
+
+    // Update user document
     const user = await User.findByIdAndUpdate(
         req.user._id,
-        { $set: { coverImage: coverImage.url } },
-        { new: true, runValidators: true }
+        {
+            $set: {
+                coverImage: coverImage.secure_url,
+                coverImagePublicId: coverImage.public_id,
+            },
+        },
+        {
+            new: true,
+            runValidators: true,
+        }
     ).select("-password");
 
-    return res.status(200).json(new ApiResponse(200, user, "Cover image updated successfully"));
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            user,
+            "Cover image updated successfully."
+        )
+    );
 });
-export {
+//After adding avatarPublicId and coverImagePublicId to your schema, existing users in your database won't have these fields. 
+// That means deletion won't work for those old records until they're updated.
+//For testing:
+//Register a new user, or Update the existing user's document in MongoDB to include the avatarPublicId and coverImagePublicId.
+//From then on, every new upload will save the public IDs, and replacing an avatar or cover image will automatically delete the previous image from Cloudinary.
+
+const getUserChannelProfile = asyncHandler(async (req, res) => {
+    const { username } = req.params;
+    if( !username.trim() ){
+        throw new ApiError(400, "Username is missing");
+    }
+
+    const channel = await User.aggregate([
+            {
+                $match:     {
+                username: username?.toLowerCase()
+                }
+            //we will get one user
+            },
+            {
+                $lookup: {
+                    from: "subscriptions",
+                    localField: "_id",
+                    foreignField: "channel",
+                    as: "subscribers"
+                }
+            },
+            {
+                $lookup: {
+                    from: "subscriptions",
+                    localField: "_id",
+                    foreignField: "subscriber",
+                    as: "subscriberedTo"
+                }
+            },
+            {
+                $addFields: {
+                    subscribersCount: { 
+                        $size: "$subscribers"
+                     },
+                    channelSubscribedCount: { 
+                        $size: "$subscriberedTo"
+                     },
+                    isSubscribed: {
+                        $cond: {
+                            if: {
+                                $in: [req.user?._id, "$subscribers.subscriber"]
+                            },
+                            then: true,
+                            else: false 
+                        }
+                    }
+                }
+            },
+            {
+                $project: {
+                    fullName: 1,
+                    username: 1,
+                    subscribersCount: 1,
+                    channelSubscribedCount: 1,
+                    isSubscribed: 1,
+                    avatar: 1,
+                    email: 1,
+                    coverImage: 1
+                }
+            }
+
+    ])
+
+    if(!channel?.length){
+        throw new ApiError(404, "Channel not found");
+    }
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            channel[0],
+            "Channel profile fetched successfully"
+        )
+    );
+})
+
+export{
     registerUser,
     loginUser,
     logoutUser,
@@ -356,5 +491,6 @@ export {
     getCurrentUser,
     updateAccountDetails,
     updateUserAvatar,
-    updateUserCoverImage
+    updateUserCoverImage,
+    getUserChannelProfile
 }
